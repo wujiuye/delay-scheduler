@@ -1,0 +1,14 @@
+data:
+  storageRootPath: /tmp/leveldb
+server:
+  idleTimeout: 15
+  workThreads: 20
+  nodes:
+    - nodeId: 1
+      host: 127.0.0.1:10063:8080
+    - nodeId: 2
+      host: 127.0.0.1:10064:8081
+    - nodeId: 3
+      host: 127.0.0.1:10065:8082
+raft:
+  commandLogPath: /tmp/raft
