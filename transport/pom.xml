@@ -4,14 +4,13 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <parent>
         <artifactId>delay-scheduler</artifactId>
-        <groupId>com.msyc</groupId>
+        <groupId>com.github.wujiuye</groupId>
         <version>1.0.0</version>
     </parent>
 
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>transport</artifactId>
-    <groupId>com.github.wujiuye</groupId>
     <version>1.0.0</version>
 
     <packaging>pom</packaging>
