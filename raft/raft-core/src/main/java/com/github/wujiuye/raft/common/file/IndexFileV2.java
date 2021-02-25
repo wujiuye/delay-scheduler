@@ -1,8 +1,15 @@
 package com.github.wujiuye.raft.common.file;
 
 import java.io.*;
+import java.net.URI;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -12,7 +19,7 @@ import java.util.stream.Collectors;
  *
  * @author wujiuye 2021/02/22
  */
-public class IndexFile implements Closeable {
+public class IndexFileV2 implements Closeable {
 
     private final static String SUFFIX = ".idx";
     private final static int MAX_RECORD = 65535;
@@ -20,11 +27,11 @@ public class IndexFile implements Closeable {
     private String rootPath, logFileName;
 
     private AtomicReference<String> curFile = new AtomicReference<>(null);
-    private AtomicReference<FileOutputStream> outputStream = new AtomicReference<>(null);
+    private AtomicReference<FileChannel> fileChannel = new AtomicReference<>(null);
     private AtomicLong curIndex;
     private AtomicLong curIndexFileStart;
 
-    public IndexFile(String rootPath, String logFileName) throws IOException {
+    public IndexFileV2(String rootPath, String logFileName) throws IOException {
         this.rootPath = rootPath;
         this.logFileName = logFileName;
         ensureFileExist();
@@ -49,8 +56,7 @@ public class IndexFile implements Closeable {
         } else {
             String fileName = files.get(0);
             curFile.set(fileName);
-            // 不将append设置为true会导致文件内容被清空
-            outputStream.set(new FileOutputStream(rootPath + "/" + fileName, true));
+            fileChannel.set(FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + fileName)), StandardOpenOption.WRITE));
         }
         removeExpireFile(7);
     }
@@ -62,15 +68,15 @@ public class IndexFile implements Closeable {
         File file = new File(rootPath + "/" + newFileName);
         if (!file.exists()) {
             if (file.createNewFile()) {
-                if (outputStream.get() != null) {
-                    outputStream.get().close();
+                if (fileChannel.get() != null) {
+                    fileChannel.get().close();
                 }
                 curFile.set(newFileName);
-                outputStream.set(new FileOutputStream(file, true));
+                fileChannel.set(FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + newFileName)), StandardOpenOption.WRITE));
             }
-        } else if (outputStream.get() == null) {
+        } else if (fileChannel.get() == null) {
             curFile.set(newFileName);
-            outputStream.set(new FileOutputStream(file, true));
+            fileChannel.set(FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + newFileName)), StandardOpenOption.WRITE));
         }
     }
 
@@ -120,11 +126,20 @@ public class IndexFile implements Closeable {
             if (curIndex.get() - curIndexFileStart.get() >= MAX_RECORD) {
                 createNewFile(curIndexFileStart.get() + MAX_RECORD);
             }
-            FileOutputStream fos = outputStream.get();
-            fos.getChannel().position((curIndex.get() + 1 - curIndexFileStart.get()) * indexLength());
-            curIndex.incrementAndGet();
-            fos.getChannel().write(ByteBuffer.wrap(toByte(curIndex.get())));
-            fos.getChannel().write(ByteBuffer.wrap(toByte(index == curIndex.get() ? offset : Long.MIN_VALUE)));
+            FileChannel channel = fileChannel.get();
+            FileLock fileLock = null;
+            try {
+                //  fileLock = channel.lock();
+                // 默认已经是append，不需要移动指针
+                // channel.position((curIndex.get() + 1 - curIndexFileStart.get()) * indexLength());
+                curIndex.incrementAndGet();
+                channel.write(ByteBuffer.wrap(toByte(curIndex.get())));
+                channel.write(ByteBuffer.wrap(toByte(index == curIndex.get() ? offset : Long.MIN_VALUE)));
+            } finally {
+                if (fileLock != null) {
+                    fileLock.release();
+                }
+            }
         }
     }
 
@@ -133,12 +148,6 @@ public class IndexFile implements Closeable {
         if (postion == null) {
             throw new NullPointerException("not found record by index " + index);
         }
-        // 会导致文件此位置之后的内容被清空
-        // try (FileOutputStream fileInputStream = new FileOutputStream(rootPath + "/" + postion.fileName, false)) {
-        //    fileInputStream.getChannel().position((index - postion.startIndex) * (8 + 8));
-        //    fileInputStream.getChannel().write(ByteBuffer.wrap(toByte(index)));
-        //    fileInputStream.getChannel().write(ByteBuffer.wrap(toByte(offset)));
-        // }
         try (RandomAccessFile randomAccessFile = new RandomAccessFile(rootPath + "/" + postion.fileName, "rw")) {
             randomAccessFile.seek((index - postion.startIndex) * indexLength());
             randomAccessFile.write(toByte(index));
@@ -241,17 +250,17 @@ public class IndexFile implements Closeable {
         Postion postion = postionByIndex(index);
         long offset = -1;
         if (postion != null) {
-            try (FileInputStream fileInputStream = new FileInputStream(rootPath + "/" + postion.fileName)) {
-                fileInputStream.getChannel().position((index - postion.startIndex) * indexLength());
+            try (FileChannel fileChannel = FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + postion.fileName)), StandardOpenOption.READ)) {
+                fileChannel.position((index - postion.startIndex) * indexLength());
                 ByteBuffer buffer = ByteBuffer.allocate(8);
                 for (; ; ) {
-                    if (fileInputStream.getChannel().read(buffer) != 8) {
+                    if (fileChannel.read(buffer) != 8) {
                         break;
                     }
                     buffer.flip();
                     long indexRead = buffer.getLong();
                     buffer.clear();
-                    if (fileInputStream.getChannel().read(buffer) != 8) {
+                    if (fileChannel.read(buffer) != 8) {
                         break;
                     }
                     buffer.flip();
@@ -301,8 +310,8 @@ public class IndexFile implements Closeable {
 
     @Override
     public void close() throws IOException {
-        if (outputStream != null) {
-            outputStream.get().close();
+        if (fileChannel != null) {
+            fileChannel.get().close();
         }
     }
 
