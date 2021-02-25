@@ -7,24 +7,15 @@
         <groupId>com.github.wujiuye</groupId>
         <version>1.0.0</version>
     </parent>
-
     <modelVersion>4.0.0</modelVersion>
-    <artifactId>raft</artifactId>
+
+    <artifactId>scheduler</artifactId>
     <packaging>pom</packaging>
 
     <modules>
-        <module>raft-core</module>
-        <module>raft-sdk</module>
-        <module>raft-demo</module>
+        <module>delay-scheduler-core</module>
+        <module>delay-scheduler-server</module>
+        <module>delay-scheduler-client</module>
     </modules>
-
-    <dependencies>
-        <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <version>4.12</version>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
 
 </project>

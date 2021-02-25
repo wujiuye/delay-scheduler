@@ -1,8 +1,18 @@
 package com.github.wujiuye.raft.common.file;
 
-import java.io.*;
+import java.io.Closeable;
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.net.URI;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -12,7 +22,7 @@ import java.util.stream.Collectors;
  *
  * @author wujiuye 2021/02/22
  */
-public class IndexFile implements Closeable {
+public class IndexFileV3 implements Closeable {
 
     private final static String SUFFIX = ".idx";
     private final static int MAX_RECORD = 65535;
@@ -20,16 +30,26 @@ public class IndexFile implements Closeable {
     private String rootPath, logFileName;
 
     private AtomicReference<String> curFile = new AtomicReference<>(null);
-    private AtomicReference<FileOutputStream> outputStream = new AtomicReference<>(null);
-    private AtomicLong curIndex;
-    private AtomicLong curIndexFileStart;
+    private AtomicReference<FileChannel> fileChannel = new AtomicReference<>(null);
+    private AtomicReference<MappedByteBuffer> mappedByteBuffer = new AtomicReference<>(null);
+    private AtomicLong curIndexFileStart = new AtomicLong(-1), curIndexFileEnd = new AtomicLong(-1);
+    private Thread thread;
 
-    public IndexFile(String rootPath, String logFileName) throws IOException {
+    public IndexFileV3(String rootPath, String logFileName) throws IOException {
         this.rootPath = rootPath;
         this.logFileName = logFileName;
         ensureFileExist();
         curFile.set(listSortFiles().get(0));
-        curIndex = new AtomicLong(initReadCurIndexFileRecords());
+        thread = new Thread(() -> {
+            while (!thread.isInterrupted() && fileChannel.get() != null && mappedByteBuffer.get() != null) {
+                mappedByteBuffer.get().force();
+                try {
+                    Thread.sleep(1000L);
+                } catch (InterruptedException ignored) {
+                }
+            }
+        }, "index-force");
+        thread.start();
     }
 
     private void removeExpireFile(int before) throws IOException {
@@ -48,9 +68,16 @@ public class IndexFile implements Closeable {
             createNewFile(0);
         } else {
             String fileName = files.get(0);
+            String endStr = fileName.substring(logFileName.length() + 1);
+            String[] fninfo = endStr.split("\\.");
+            String[] indexRange = fninfo[0].split("-");
+            long indexStart = Long.parseLong(indexRange[0]);
+            long indexEnd = Long.parseLong(indexRange[1]);
+            curIndexFileStart.set(indexStart);
+            curIndexFileEnd.set(indexEnd);
             curFile.set(fileName);
-            // 不将append设置为true会导致文件内容被清空
-            outputStream.set(new FileOutputStream(rootPath + "/" + fileName, true));
+            fileChannel.set(FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + fileName)), StandardOpenOption.WRITE, StandardOpenOption.READ));
+            mappedByteBuffer.set(fileChannel.get().map(FileChannel.MapMode.READ_WRITE, 0, headerLength() + MAX_RECORD * indexLength()));
         }
         removeExpireFile(7);
     }
@@ -62,15 +89,24 @@ public class IndexFile implements Closeable {
         File file = new File(rootPath + "/" + newFileName);
         if (!file.exists()) {
             if (file.createNewFile()) {
-                if (outputStream.get() != null) {
-                    outputStream.get().close();
+                if (mappedByteBuffer.get() != null) {
+                    mappedByteBuffer.get().force();
+                }
+                if (fileChannel.get() != null) {
+                    fileChannel.get().close();
                 }
                 curFile.set(newFileName);
-                outputStream.set(new FileOutputStream(file, true));
+                fileChannel.set(FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + newFileName)), StandardOpenOption.WRITE, StandardOpenOption.READ));
+                mappedByteBuffer.set(fileChannel.get().map(FileChannel.MapMode.READ_WRITE, 0, headerLength() + MAX_RECORD * indexLength()));
+                curIndexFileStart.set(newFileStartIndex);
+                curIndexFileEnd.set((newFileStartIndex + MAX_RECORD - 1));
             }
-        } else if (outputStream.get() == null) {
+        } else if (fileChannel.get() == null) {
             curFile.set(newFileName);
-            outputStream.set(new FileOutputStream(file, true));
+            fileChannel.set(FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + newFileName)), StandardOpenOption.WRITE, StandardOpenOption.READ));
+            mappedByteBuffer.set(fileChannel.get().map(FileChannel.MapMode.READ_WRITE, 0, headerLength() + MAX_RECORD * indexLength()));
+            curIndexFileStart.set(newFileStartIndex);
+            curIndexFileEnd.set((newFileStartIndex + MAX_RECORD - 1));
         }
     }
 
@@ -100,47 +136,33 @@ public class IndexFile implements Closeable {
         }).collect(Collectors.toList());
     }
 
-    private long initReadCurIndexFileRecords() {
-        List<String> files = listSortFiles();
-        String fileName = files.get(0);
-        String endStr = fileName.substring(logFileName.length() + 1);
-        String[] fninfo = endStr.split("\\.");
-        String[] indexRange = fninfo[0].split("-");
-        long indexStart = Long.parseLong(indexRange[0]);
-        curIndexFileStart = new AtomicLong(indexStart);
-        File file = new File(rootPath + "/" + fileName);
-        return indexStart + file.length() / indexLength() - 1; // index start by 0
-    }
-
     public synchronized void appendOffset(long index, long offset) throws IOException {
-        if (index < curIndex.get()) {
-            throw new RuntimeException("index err.");
+        if (index < curIndexFileStart.get()) {
+            updateOffset(index, offset);
+            return;
         }
-        for (; index > curIndex.get(); ) {
-            if (curIndex.get() - curIndexFileStart.get() >= MAX_RECORD) {
-                createNewFile(curIndexFileStart.get() + MAX_RECORD);
-            }
-            FileOutputStream fos = outputStream.get();
-            fos.getChannel().position((curIndex.get() + 1 - curIndexFileStart.get()) * indexLength());
-            curIndex.incrementAndGet();
-            fos.getChannel().write(ByteBuffer.wrap(toByte(curIndex.get())));
-            fos.getChannel().write(ByteBuffer.wrap(toByte(index == curIndex.get() ? offset : Long.MIN_VALUE)));
+        if (index > curIndexFileEnd.get()) {
+            createNewFile(curIndexFileEnd.get() + 1);
         }
+        mappedByteBuffer.get().position((int) ((index - curIndexFileStart.get()) * indexLength() + headerLength()));
+        mappedByteBuffer.get().put(ByteBuffer.wrap(toByte(index)));
+        mappedByteBuffer.get().put(ByteBuffer.wrap(toByte(offset)));
+        writeFileHeader(mappedByteBuffer.get(), index);
     }
 
     public synchronized void updateOffset(long index, long offset) throws IOException {
+        if (index >= curIndexFileStart.get() && index <= curIndexFileEnd.get()) {
+            mappedByteBuffer.get().position((int) ((index - curIndexFileStart.get()) * indexLength() + headerLength()));
+            mappedByteBuffer.get().put(ByteBuffer.wrap(toByte(index)));
+            mappedByteBuffer.get().put(ByteBuffer.wrap(toByte(offset)));
+            return;
+        }
         Postion postion = postionByIndex(index);
         if (postion == null) {
             throw new NullPointerException("not found record by index " + index);
         }
-        // 会导致文件此位置之后的内容被清空
-        // try (FileOutputStream fileInputStream = new FileOutputStream(rootPath + "/" + postion.fileName, false)) {
-        //    fileInputStream.getChannel().position((index - postion.startIndex) * (8 + 8));
-        //    fileInputStream.getChannel().write(ByteBuffer.wrap(toByte(index)));
-        //    fileInputStream.getChannel().write(ByteBuffer.wrap(toByte(offset)));
-        // }
         try (RandomAccessFile randomAccessFile = new RandomAccessFile(rootPath + "/" + postion.fileName, "rw")) {
-            randomAccessFile.seek((index - postion.startIndex) * indexLength());
+            randomAccessFile.seek((index - postion.startIndex) * indexLength() + headerLength());
             randomAccessFile.write(toByte(index));
             randomAccessFile.write(toByte(offset));
         }
@@ -159,8 +181,34 @@ public class IndexFile implements Closeable {
         return writeBuffer;
     }
 
+    private static long toLong(byte[] bytes, int offset) {
+        long value = ((long) (bytes[offset]) & 0xff) << 56;
+        value |= ((long) (bytes[offset + 1]) & 0xff) << 48;
+        value |= ((long) (bytes[offset + 2]) & 0xff) << 40;
+        value |= ((long) (bytes[offset + 3]) & 0xff) << 32;
+        value |= (bytes[offset + 4] & 0xff) << 24;
+        value |= (bytes[offset + 5] & 0xff) << 16;
+        value |= (bytes[offset + 6] & 0xff) << 8;
+        value |= (bytes[offset + 7] & 0xff);
+        return value;
+    }
+
     private static int indexLength() {
         return toByte(0).length * 2;
+    }
+
+    private static int headerLength() {
+        return toByte(0).length;
+    }
+
+    private void writeFileHeader(MappedByteBuffer mappedByteBuffer, long latestNewIndex) {
+        mappedByteBuffer.position(0);
+        mappedByteBuffer.putLong(latestNewIndex);
+    }
+
+    private long readFileHeader(MappedByteBuffer mappedByteBuffer) {
+        mappedByteBuffer.position(0);
+        return mappedByteBuffer.getLong();
     }
 
     private Postion postionByIndex(long index) {
@@ -235,23 +283,45 @@ public class IndexFile implements Closeable {
         public String getLogFileName() {
             return logFileName;
         }
+
+        @Override
+        public String toString() {
+            return "Offset{" +
+                    "logFileName='" + logFileName + '\'' +
+                    ", physicsOffset=" + physicsOffset +
+                    '}';
+        }
+
     }
 
     public Offset findOffset(long index) {
+        if (index >= curIndexFileStart.get() && index <= curIndexFileEnd.get()) {
+            mappedByteBuffer.get().position((int) ((index - curIndexFileStart.get()) * indexLength() + headerLength()));
+            byte[] bytes = new byte[16];
+            mappedByteBuffer.get().get(bytes, 0, 16);
+            long offset = toLong(bytes, 8);
+            if (offset >= 0) {
+                return new Offset(curFile.get().split("\\.")[0], offset);
+            } else if (offset == Long.MIN_VALUE) {
+                // 索引被标志为删除Long.MIN_VALUE
+                return null;
+            }
+            return null;
+        }
         Postion postion = postionByIndex(index);
         long offset = -1;
         if (postion != null) {
-            try (FileInputStream fileInputStream = new FileInputStream(rootPath + "/" + postion.fileName)) {
-                fileInputStream.getChannel().position((index - postion.startIndex) * indexLength());
+            try (FileChannel fileChannel = FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + postion.fileName)), StandardOpenOption.READ)) {
+                fileChannel.position((index - postion.startIndex) * indexLength() + headerLength());
                 ByteBuffer buffer = ByteBuffer.allocate(8);
                 for (; ; ) {
-                    if (fileInputStream.getChannel().read(buffer) != 8) {
+                    if (fileChannel.read(buffer) != 8) {
                         break;
                     }
                     buffer.flip();
                     long indexRead = buffer.getLong();
                     buffer.clear();
-                    if (fileInputStream.getChannel().read(buffer) != 8) {
+                    if (fileChannel.read(buffer) != 8) {
                         break;
                     }
                     buffer.flip();
@@ -281,17 +351,24 @@ public class IndexFile implements Closeable {
      *
      * @return 物理偏移
      */
-    public Offset latestEffectiveIndexOffset() {
-        if (curIndex.get() < 0) {
-            return null;
-        }
-        long ptr = curIndex.get();
-        do {
-            Offset offset = findOffset(ptr);
-            if (offset != null) {
-                return offset;
+    public synchronized Offset latestEffectiveIndexOffset() {
+        List<String> files = listSortFiles();
+        if (!files.isEmpty()) {
+            String fileName = files.get(0);
+            try (FileChannel channel = FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + fileName)), StandardOpenOption.WRITE, StandardOpenOption.READ)) {
+                MappedByteBuffer mappedByteBuffer = channel.map(FileChannel.MapMode.READ_WRITE, 0, MAX_RECORD * indexLength());
+                long index = readFileHeader(mappedByteBuffer);
+                byte[] bytes = new byte[16];
+                mappedByteBuffer.position((int) (index * indexLength() + headerLength()));
+                mappedByteBuffer.get(bytes, 0, 16);
+                long offset = toLong(bytes, 8);
+                if (index >= 0 && offset >= 0) {
+                    return new Offset(fileName.split("\\.")[0], offset);
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
             }
-        } while ((ptr--) >= curIndexFileStart.get());
+        }
         return null;
     }
 
@@ -301,8 +378,12 @@ public class IndexFile implements Closeable {
 
     @Override
     public void close() throws IOException {
-        if (outputStream != null) {
-            outputStream.get().close();
+        if (fileChannel != null) {
+            mappedByteBuffer.get().force();
+            fileChannel.get().close();
+            fileChannel.set(null);
+            mappedByteBuffer.set(null);
+            thread.interrupt();
         }
     }
 
