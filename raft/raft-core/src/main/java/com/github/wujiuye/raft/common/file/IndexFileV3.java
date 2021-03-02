@@ -13,6 +13,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -30,10 +31,10 @@ public class IndexFileV3 implements Closeable {
     private String rootPath, logFileName;
 
     private AtomicReference<String> curFile = new AtomicReference<>(null);
-    private AtomicReference<FileChannel> fileChannel = new AtomicReference<>(null);
     private AtomicReference<MappedByteBuffer> mappedByteBuffer = new AtomicReference<>(null);
     private AtomicLong curIndexFileStart = new AtomicLong(-1), curIndexFileEnd = new AtomicLong(-1);
     private Thread thread;
+    private AtomicBoolean force = new AtomicBoolean(true);
 
     public IndexFileV3(String rootPath, String logFileName) throws IOException {
         this.rootPath = rootPath;
@@ -41,8 +42,10 @@ public class IndexFileV3 implements Closeable {
         ensureFileExist();
         curFile.set(listSortFiles().get(0));
         thread = new Thread(() -> {
-            while (!thread.isInterrupted() && fileChannel.get() != null && mappedByteBuffer.get() != null) {
-                mappedByteBuffer.get().force();
+            while (force.get()) {
+                if (mappedByteBuffer.get() != null) {
+                    mappedByteBuffer.get().force();
+                }
                 try {
                     Thread.sleep(1000L);
                 } catch (InterruptedException ignored) {
@@ -76,8 +79,9 @@ public class IndexFileV3 implements Closeable {
             curIndexFileStart.set(indexStart);
             curIndexFileEnd.set(indexEnd);
             curFile.set(fileName);
-            fileChannel.set(FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + fileName)), StandardOpenOption.WRITE, StandardOpenOption.READ));
-            mappedByteBuffer.set(fileChannel.get().map(FileChannel.MapMode.READ_WRITE, 0, headerLength() + MAX_RECORD * indexLength()));
+            FileChannel fileChannel = FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + fileName)), StandardOpenOption.WRITE, StandardOpenOption.READ);
+            mappedByteBuffer.set(fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, headerLength() + MAX_RECORD * indexLength()));
+            fileChannel.close();
         }
         removeExpireFile(7);
     }
@@ -92,19 +96,18 @@ public class IndexFileV3 implements Closeable {
                 if (mappedByteBuffer.get() != null) {
                     mappedByteBuffer.get().force();
                 }
-                if (fileChannel.get() != null) {
-                    fileChannel.get().close();
-                }
                 curFile.set(newFileName);
-                fileChannel.set(FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + newFileName)), StandardOpenOption.WRITE, StandardOpenOption.READ));
-                mappedByteBuffer.set(fileChannel.get().map(FileChannel.MapMode.READ_WRITE, 0, headerLength() + MAX_RECORD * indexLength()));
+                FileChannel fileChannel = FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + newFileName)), StandardOpenOption.WRITE, StandardOpenOption.READ);
+                mappedByteBuffer.set(fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, headerLength() + MAX_RECORD * indexLength()));
+                fileChannel.close();
                 curIndexFileStart.set(newFileStartIndex);
                 curIndexFileEnd.set((newFileStartIndex + MAX_RECORD - 1));
             }
-        } else if (fileChannel.get() == null) {
+        } else if (mappedByteBuffer.get() == null) {
             curFile.set(newFileName);
-            fileChannel.set(FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + newFileName)), StandardOpenOption.WRITE, StandardOpenOption.READ));
-            mappedByteBuffer.set(fileChannel.get().map(FileChannel.MapMode.READ_WRITE, 0, headerLength() + MAX_RECORD * indexLength()));
+            FileChannel fileChannel = FileChannel.open(Paths.get(URI.create("file:" + rootPath + "/" + newFileName)), StandardOpenOption.WRITE, StandardOpenOption.READ);
+            mappedByteBuffer.set(fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, headerLength() + MAX_RECORD * indexLength()));
+            fileChannel.close();
             curIndexFileStart.set(newFileStartIndex);
             curIndexFileEnd.set((newFileStartIndex + MAX_RECORD - 1));
         }
@@ -161,6 +164,7 @@ public class IndexFileV3 implements Closeable {
         if (postion == null) {
             throw new NullPointerException("not found record by index " + index);
         }
+        // 非频率写，不用MappedByteBuffer
         try (RandomAccessFile randomAccessFile = new RandomAccessFile(rootPath + "/" + postion.fileName, "rw")) {
             randomAccessFile.seek((index - postion.startIndex) * indexLength() + headerLength());
             randomAccessFile.write(toByte(index));
@@ -377,13 +381,11 @@ public class IndexFileV3 implements Closeable {
     }
 
     @Override
-    public void close() throws IOException {
-        if (fileChannel != null) {
+    public void close() {
+        if (mappedByteBuffer != null) {
             mappedByteBuffer.get().force();
-            fileChannel.get().close();
-            fileChannel.set(null);
             mappedByteBuffer.set(null);
-            thread.interrupt();
+            force.set(false);
         }
     }
 
