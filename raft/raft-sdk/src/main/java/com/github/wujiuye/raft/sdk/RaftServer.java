@@ -1,6 +1,6 @@
 package com.github.wujiuye.raft.sdk;
 
-import com.github.wujiuye.raft.CommandLogAppender;
+import com.github.wujiuye.raft.appender.CommandLogAppender;
 import com.github.wujiuye.raft.Raft;
 import com.github.wujiuye.raft.common.NodeIpPort;
 import com.github.wujiuye.raft.rpc.replication.FollowerAppendEntriesRpc;

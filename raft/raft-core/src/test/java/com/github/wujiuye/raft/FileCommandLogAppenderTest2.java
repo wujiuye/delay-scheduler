@@ -1,5 +1,6 @@
 package com.github.wujiuye.raft;
 
+import com.github.wujiuye.raft.appender.FileCommandLogAppender;
 import org.junit.Before;
 import org.junit.Test;
 

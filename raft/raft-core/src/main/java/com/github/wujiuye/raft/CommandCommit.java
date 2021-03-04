@@ -1,5 +1,7 @@
 package com.github.wujiuye.raft;
 
+import com.github.wujiuye.raft.appender.CommandLogAppender;
+
 /**
  * 将日记条目提交到状态机执行
  *

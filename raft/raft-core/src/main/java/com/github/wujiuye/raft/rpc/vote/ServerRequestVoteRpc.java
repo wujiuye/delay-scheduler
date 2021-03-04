@@ -3,7 +3,7 @@ package com.github.wujiuye.raft.rpc.vote;
 import com.github.wujiuye.raft.common.TermVoter;
 import com.github.wujiuye.raft.Raft;
 import com.github.wujiuye.raft.CommandLog;
-import com.github.wujiuye.raft.CommandLogAppender;
+import com.github.wujiuye.raft.appender.CommandLogAppender;
 import com.github.wujiuye.raft.RaftNode;
 
 /**

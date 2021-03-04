@@ -1,5 +1,6 @@
-package com.github.wujiuye.raft;
+package com.github.wujiuye.raft.appender;
 
+import com.github.wujiuye.raft.CommandLog;
 import com.github.wujiuye.raft.common.file.AppendLogFile;
 
 import java.io.Closeable;

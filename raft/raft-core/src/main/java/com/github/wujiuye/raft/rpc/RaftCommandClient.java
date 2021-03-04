@@ -4,7 +4,7 @@ import com.github.wujiuye.raft.*;
 import com.github.wujiuye.raft.common.HeartbeatCallable;
 import com.github.wujiuye.raft.common.HeartbeatScheduler;
 import com.github.wujiuye.raft.common.LoggerUtils;
-import com.github.wujiuye.raft.CommandLogAppender;
+import com.github.wujiuye.raft.appender.CommandLogAppender;
 import com.github.wujiuye.raft.rpc.replication.AppendEntries;
 import com.github.wujiuye.raft.rpc.replication.AppendEntriesRpc;
 import com.github.wujiuye.raft.rpc.replication.LeaderAppendEntriesClient;
@@ -97,6 +97,7 @@ public class RaftCommandClient implements VoteListener, Closeable {
         commandLog.setCommand(command);
         commandLog.setTerm(Raft.getNode(nodeId).getCurTerm());
         commandLog.setIndex(nextLogIndex());
+        commandLog.setStatus(0);
         commandLogAppender.append(commandLog);
         // 请求同步日记
         AppendEntries appendEntries = leaderAppendEntriesClient.newAppendEntries();

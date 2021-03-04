@@ -1,6 +1,7 @@
 package com.github.wujiuye.raft.rpc.replication;
 
 import com.github.wujiuye.raft.*;
+import com.github.wujiuye.raft.appender.CommandLogAppender;
 import com.github.wujiuye.raft.common.CountWaiter;
 import com.github.wujiuye.raft.common.IdUtils;
 import com.github.wujiuye.raft.common.LoggerUtils;

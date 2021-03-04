@@ -1,4 +1,6 @@
-package com.github.wujiuye.raft;
+package com.github.wujiuye.raft.appender;
+
+import com.github.wujiuye.raft.CommandLog;
 
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;

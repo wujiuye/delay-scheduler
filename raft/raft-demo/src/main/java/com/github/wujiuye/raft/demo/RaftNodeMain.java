@@ -1,8 +1,8 @@
 package com.github.wujiuye.raft.demo;
 
-import com.github.wujiuye.raft.CommandLogAppender;
-import com.github.wujiuye.raft.DefaultCommandLogAppender;
-import com.github.wujiuye.raft.FileCommandLogAppender;
+import com.github.wujiuye.raft.appender.CommandLogAppender;
+import com.github.wujiuye.raft.appender.DefaultCommandLogAppender;
+import com.github.wujiuye.raft.appender.FileCommandLogAppender;
 import com.github.wujiuye.raft.common.NodeIpPort;
 import com.github.wujiuye.raft.common.SignalManager;
 import com.github.wujiuye.raft.rpc.CommandResp;

@@ -17,11 +17,11 @@ public class IndexFileTest {
 
     @Before
     public void before() throws IOException {
-        File file = new File("/tmp/test/index_v0");
+        File file = new File("/tmp/test/index");
         if (!file.exists()) {
             file.mkdirs();
         }
-        indexFile = new IndexFile("/tmp/test/index_v0", "index");
+        indexFile = new IndexFile("/tmp/test/index", "index");
     }
 
     @Test
@@ -87,7 +87,7 @@ public class IndexFileTest {
     public void after() throws IOException {
         executorService.shutdownNow();
         indexFile.close();
-        File file = new File("/tmp/test/index_v0");
+        File file = new File("/tmp/test/index");
         if (file.exists()) {
             File[] childList = file.listFiles();
             for (File file1 : childList) {
