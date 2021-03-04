@@ -1,6 +1,6 @@
 package com.github.wujiuye.raft.rpc;
 
-import com.github.wujiuye.raft.CommandLogAppender;
+import com.github.wujiuye.raft.appender.CommandLogAppender;
 import com.github.wujiuye.raft.Raft;
 import com.github.wujiuye.raft.common.ElectionTimer;
 import com.github.wujiuye.raft.common.HeartbeatCallable;

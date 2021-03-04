@@ -25,7 +25,7 @@ public class AppendLogFile implements Closeable {
 
     private String rootPath, logFileName;
 
-    private AtomicReference<IndexFileV3> indexFile = new AtomicReference<>(null);
+    private AtomicReference<IndexFile> indexFile = new AtomicReference<>(null);
     private AtomicReference<String> curFile = new AtomicReference<>(null);
     private AtomicLong curFileLen = new AtomicLong(0);
     private AtomicReference<FileOutputStream> outputStream = new AtomicReference<>(null);
@@ -69,14 +69,14 @@ public class AppendLogFile implements Closeable {
         if (index < 0) {
             return null;
         }
-        IndexFileV3.Offset offset = indexFile.get().findOffset(index);
+        IndexFile.Offset offset = indexFile.get().findOffset(index);
         if (offset == null) {
             return null;
         }
         return findCommandLog(offset);
     }
 
-    private CommandLog findCommandLog(IndexFileV3.Offset offset) {
+    private CommandLog findCommandLog(IndexFile.Offset offset) {
         try (FileInputStream fileInputStream = new FileInputStream(rootPath + "/" + offset.getLogFileName() + SUFFIX)) {
             fileInputStream.getChannel().position(offset.getPhysicsOffset());
             ByteBuffer buffer = ByteBuffer.allocate(4096);
@@ -104,7 +104,7 @@ public class AppendLogFile implements Closeable {
     }
 
     public CommandLog upToDateCommandLog() {
-        IndexFileV3.Offset offset = indexFile.get().latestEffectiveIndexOffset();
+        IndexFile.Offset offset = indexFile.get().latestEffectiveIndexOffset();
         if (offset == null) {
             return null;
         }
@@ -158,12 +158,12 @@ public class AppendLogFile implements Closeable {
                 }
                 curFile.set(newFileName);
                 outputStream.set(new FileOutputStream(file, true));
-                indexFile.set(new IndexFileV3(rootPath, newIndexFileName));
+                indexFile.set(new IndexFile(rootPath, newIndexFileName));
             }
         } else if (outputStream.get() == null) {
             curFile.set(newFileName);
             outputStream.set(new FileOutputStream(file, true));
-            indexFile.set(new IndexFileV3(rootPath, newIndexFileName));
+            indexFile.set(new IndexFile(rootPath, newIndexFileName));
         }
         curFileLen.set(file.length());
     }

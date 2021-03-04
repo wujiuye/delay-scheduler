@@ -2,7 +2,7 @@ package com.github.wujiuye.raft.rpc.replication;
 
 import com.github.wujiuye.raft.*;
 import com.github.wujiuye.raft.common.HeartbeatCallable;
-import com.github.wujiuye.raft.CommandLogAppender;
+import com.github.wujiuye.raft.appender.CommandLogAppender;
 import com.github.wujiuye.raft.common.LoggerUtils;
 
 /**
