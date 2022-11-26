@@ -1,4 +1,5 @@
 # 分布式延迟调度中间件（delay-scheduler）
+!!!仅供学习，忽用于生产环境
 自实现Raft分布式一致性算法+LevelDB实现分布式action日记存储，使用时间轮算法调度action，支持取消action。
 ## 流程
 * 只有一个Leader节点处理客户端的请求；
